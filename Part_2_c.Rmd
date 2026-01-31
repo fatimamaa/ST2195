@@ -1,0 +1,248 @@
+---
+title: "ST2195 Coursework - Part 2 (c)"
+author: "SRN 230713176"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+
+### importing libraries
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+### read csv files
+```{r}
+airports <- read.csv("airports.csv", header = TRUE)
+```
+
+
+### flight data
+```{r}
+df_1 <- read.csv("2000.csv", header = TRUE)
+df_2 <- read.csv("2001.csv", header = TRUE)
+df_3 <- read.csv("2002.csv", header = TRUE)
+df_4 <- read.csv("2003.csv", header = TRUE)
+df_5 <- read.csv("2004.csv", header = TRUE)
+```
+
+
+### combine all years into a dataframe
+```{r}
+dfs <- rbind.data.frame(df_1, df_2, df_3, df_4, df_5)
+
+# data summary
+summary(dfs)
+
+# drop columns unrelated to question
+dfs <- dfs %>% select(-TaxiIn, -TaxiOut, FlightNum, TailNum, ActualElapsedTime,
+CRSElapsedTime, AirTime, Cancelled, CancellationCode, -CarrierDelay,
+-WeatherDelay, -NASDelay, -SecurityDelay, -LateAircraftDelay)
+
+# drop NAs and mssisng values
+dfs <- dfs %>% drop_na(DepTime, CRSDepTime, Year, Month, DayofMonth)
+
+# save file for efficiency
+saveRDS(dfs, 'flightdatac.rds')
+```
+
+
+### open dataframe
+```{r}
+df <- readRDS('flightdatac.rds')
+```
+
+
+
+# Question (c)
+For each year, fit a logistic regression model for the probability of diverted US flights
+using as many features as possible from attributes of the departure date, the scheduled departure and arrival times,
+the coordinates and distance between departure and planned arrival airports,
+and the carrier. Visualize the coefficients across years.
+
+
+
+### question specifies US flights
+```{r}
+df_us <- df %>%
+  filter(UniqueCarrier == 'US')
+```
+
+
+### merge airport locations with flight records
+```{r}
+df_us <- df_us %>%
+  left_join(airports, by = c("Dest" = "iata")) %>%
+  rename(Dest_lat = lat, Dest_long = long) %>%
+  left_join(airports, by = c("Origin" = "iata")) %>%
+  rename(Origin_lat = lat, Origin_long = long)
+```
+
+
+### select columns to use
+```{r}
+columns_to_use <- c('Year', 'Month', 'DayOfWeek', 'CRSDepTime', 'CRSArrTime',
+                    'Distance', 'Origin_lat', 'Origin_long', 'Dest_lat',
+                    'Dest_long', 'Diverted')
+
+df_us <- df_us %>%
+  select(all_of(columns_to_use)) %>%
+  na.omit()
+```
+
+
+### feature names
+```{r}
+feature_names <- c('Month', 'DayOfWeek', 'CRSDepTime', 'CRSArrTime',
+                    'Distance', 'Origin_lat', 'Origin_long', 'Dest_lat',
+                    'Dest_long')
+```
+
+
+### store coefficients for each year
+```{r}
+years <- sort(unique(df_us$Year))
+all_coefficients <- list()
+```
+
+
+### train the model for each year (2000-2004)
+```{r}
+for (year in years) {
+  df_year <- df_us %>% filter(Year == year)
+  
+  if (sum(df_year$Diverted) == 0) {
+    cat(paste0("warning: no diverted flights in ", year, "\n"))
+  next
+  }
+  
+  # split data for training and testing
+  set.seed(42)
+  train_index <- sample(1:nrow(df_year), 0.8 * nrow(df_year))
+  train_data <- df_year[train_index, ]
+  test_data <- df_year[-train_index, ]
+  
+  # scale features
+  train_scaled <- train_data
+  test_scaled <- test_data
+  
+  for (feature in feature_names) {
+  mean_val <- mean(train_data[[feature]])
+  sd_val <- sd(train_data[[feature]])
+  train_scaled[[feature]] <- (train_data[[feature]] - mean_val) / sd_val
+  test_scaled[[feature]] <- (test_data[[feature]] - mean_val) / sd_val
+}
+
+  # fit logistic reg.
+  formula_str <- paste("Diverted ~", paste(feature_names, collapse = "  + "))
+  model <- glm(as.formula(formula_str), data = train_scaled, family = binomial())
+  
+  # store coefficients
+  all_coefficients[[as.character(year)]] <- coef(model)[-1]
+  
+  # model performance
+  train_pred <- predict(model, train_scaled, type = "response") > 0.5
+  test_pred <- predict(model, test_scaled, type = "response") > 0.5
+  
+  train_accuracy <- mean(train_pred == train_scaled$Diverted)
+  test_accuracy <- mean(test_pred == test_scaled$Diverted)
+  
+  diverted_count <- sum(df_year$Diverted)
+  total_count <- nrow(df_year)
+  diverted_pct <- (diverted_count / total_count) * 100
+  
+  cat(sprintf("Year %d - Train accuracy: %.4f, Test accuracy: %.4f\n",
+               year, train_accuracy, test_accuracy))
+  cat(sprintf("Diverted flights: %d out of %d (%.2f%%)\n\n",
+               diverted_count, total_count, diverted_pct))
+
+}
+```
+
+
+## perp data for visualization
+```{r}
+coef_df <- data.frame()
+for (year in names(all_coefficients)) {
+  year_coefs <- data.frame(
+    Year = as.integer(year),
+    Feature = feature_names,
+    Coefficient = all_coefficients[[year]]
+)
+  coef_df <- rbind(coef_df, year_coefs)
+}
+```
+
+
+## create visualization for coefficients
+```{r}
+p <- ggplot(coef_df, aes(x= Coefficient, y = Feature)) +
+  geom_col(fill = "darkcyan") +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1,
+  alpha = 0.5) + facet_wrap(~Year, ncol = 1, scales = "free_x") + labs(
+             title = 'Logistic Reg. Coefficients by Year',
+             x = 'Coefficient Value',
+             y = 'Feature'
+  )
+  
+print(p)
+ggsave("2c_plot.png", plot = p, width = 15, height = 10, dpi = 300)
+```
+
+
+### coefficient comparison across years
+```{r}
+# convert the coefficients into a dataframe
+coef_matrix <- do.call(rbind, all_coefficients)
+rownames(coef_matrix) <- names(all_coefficients)
+colnames(coef_matrix) <- feature_names
+
+df_coeffs <- as.data.frame(coef_matrix)
+df_coeffs$Year <- rownames(df_coeffs)
+
+# create a heatmap
+df_coeffs_long <- df_coeffs %>%
+  pivot_longer(cols = -Year, names_to = "Feature", values_to = "Coefficient") %>%
+  mutate(Year = as.integer(Year))
+  
+p2 <- ggplot(df_coeffs_long, aes(x = Feature, y = factor(Year),
+                                 fill = Coefficient)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.3f", Coefficient)), size = 3) +
+  scale_fill_gradient2(low = "lightcyan", mid = "cyan", high = "darkcyan",
+                      midpoint =0, name = "Coefficient value") +
+  labs(
+    title = 'Logistic Reg. Coefficients Across Years (2000-2004)',
+    x = 'Features',
+    y = 'Years'
+  ) +
+  theme(
+    plot.title = element_text(face = 'bold', size = 12, margin = margin(b = 15)),
+    axis.title = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p2)
+ggsave("22c_plot.png", plot = p, width = 15, height = 10, dpi = 300)
+
+```
+
+
+## conclusion
+```{r}
+# summary statistics
+summary(df_coeffs[, feature_names])
+
+# feature importance: how strongly they influence the model (on average)
+avg_abs_coeff <- colMeans(abs(df_coeffs[, feature_names])) %>%
+  sort(decreasing = TRUE) %>%
+  round(4)
+
+print(avg_abs_coeff)
+```

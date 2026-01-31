@@ -1,0 +1,411 @@
+---
+title: ST2195 Coursework - Part 2 (a) & (b)
+author: SRN 230713176
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+### importing libraries
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(skimr)
+```
+
+### read csv files
+```{r}
+airplanes <- read.csv("plane-data.csv", header = TRUE)
+airports <- read.csv("airports.csv", header = TRUE)
+carriers <- read.csv("carriers.csv", header = TRUE)
+```
+
+### flight data
+```{r}
+df_1 <- read.csv("2000.csv", header = TRUE)
+df_2 <- read.csv("2001.csv", header = TRUE)
+df_3 <- read.csv("2002.csv", header = TRUE)
+df_4 <- read.csv("2003.csv", header = TRUE)
+df_5 <- read.csv("2004.csv", header = TRUE)
+```
+
+### combine all years into a dataframe
+```{r}
+dfs <- rbind.data.frame(df_1, df_2, df_3, df_4, df_5)
+
+# data summary
+summary(dfs)
+
+# drop columns unrelated to question
+dfs <- dfs %>% select(-TaxiIn, -TaxiOut, -CarrierDelay,
+-WeatherDelay, -NASDelay, -SecurityDelay, -LateAircraftDelay)
+
+# drop NAs and mssisng values
+dfs <- dfs %>% drop_na(DepTime, CRSDepTime, Year, Month, DayofMonth)
+
+# check number of cancelled flights
+dfs %>% filter(Cancelled == 1) %>% nrow()
+
+# save file for efficiency
+saveRDS(dfs, 'flightdatar.rds')
+```
+
+### open cleaned dataframe
+```{r}
+df <- readRDS('flightdatar.rds')
+```
+
+
+
+# Question (a)
+What are the best times and days of the week to minimise delays each year?
+
+### combine delay variables
+```{r}
+df <- df %>%
+  mutate(ArrDepDelay = ArrDelay + DepDelay) %>%
+  filter(ArrDepDelay >= 0) %>%
+  arrange(ArrDepDelay)
+  
+head(df)
+```
+
+## a.1 Best **time** of day to minimize delays
+```{r}
+time_delay <- df %>%
+  filter(ArrDepDelay > 0) %>%
+  group_by(CRSDepTime) %>%
+  summarise(avg_delay = mean(ArrDepDelay, na.rm = TRUE)) %>%
+  arrange(avg_delay)
+  
+head(time_delay, 10) # show lowest avg delay times
+```
+
+### create visualization
+```{r}
+p <- ggplot(time_delay, aes(x = CRSDepTime, y = avg_delay)) +
+  geom_line(linewidth = 1, color = 'darkcyan') +
+  scale_x_continuous(
+  breaks = c(0, 500, 1000, 1500, 2000, 2395),
+  labels = c('00:00', '05:00', '10:00', '15:00', '20:00', '23:59')
+  ) +
+  labs(title = 'Average Delay by Scheduled Departure Hour', x = 'Scheduled
+  Departure Hour', y = "Avg Delay (mins)")
+
+print(p)
+ggsave("2a1_plot.png", plot = p, width = 10, height = 5, dpi = 300)
+```
+
+### smallest avg delay (best time)
+```{r}
+best_time <- time_delay %>%
+  slice(which.min(avg_delay)) %>%
+  pull(CRSDepTime)
+  
+cat("Best flight time of the day is", best_time)
+```
+
+### convert from 24hr format
+```{r}
+sprintf("%02d:%02d", best_time %/% 100, best_time %% 100)
+```
+
+## conclusion
+```{r}
+cat(paste("Best flight time of the day is", sprintf("%02d:%02d", best_time %/% 100, best_time %% 100)))
+```
+
+
+## a.2 Best **day** of week to minimize delays
+```{r}
+day_delay <- df %>%
+  filter(ArrDepDelay > 0) %>%
+  group_by(DayOfWeek) %>%
+  summarise(avg_delay = mean(ArrDepDelay)) %>%
+  arrange(avg_delay)
+```
+
+### show lowest avg delay by day
+```{r}
+days_of_week <- c('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday')
+ 
+# switch day numbers into names
+day_delay$DayOfWeek <- as.integer(day_delay$DayOfWeek)
+day_delay$DayName <- days_of_week[day_delay$DayOfWeek]
+
+cat("\nAvg delay by day:\n") 
+day_delay
+```
+
+### visualize results
+```{r}
+p2 <- ggplot(day_delay, aes(x = DayName, y = avg_delay, fill = avg_delay)) +
+  geom_col(fill = 'darkcyan', width = 0.7) +
+  labs(
+  title = 'Average Delay by Day of Week',
+  x = 'Day of Week',
+  y = 'Avg Delay (mins)'
+  )
+
+print(p2)
+ggsave("2a2_plot.png", plot = p2, width = 10, height = 5, dpi = 300)
+```
+
+### smallest avg delay (best day)
+```{r}
+best_day <- day_delay %>%
+  slice(which.min(avg_delay)) %>%
+  pull(DayOfWeek)
+```
+
+## conclusion
+```{r}
+cat("Best flight day of the week is", days_of_week[best_day])
+```
+
+
+
+## a.3 Best **month** of the year to minimize delays (bonus)
+```{r}
+month_delay <- df %>%
+  group_by(Month) %>%
+  summarise(avg_delay = mean(ArrDepDelay)) %>%
+  arrange(avg_delay)
+
+# check results
+head(month_delay)
+```
+
+### add month names
+```{r}
+month_delay$MonthName <- month.abb[month_delay$Month]
+
+# show results
+month_delay %>%
+  arrange(avg_delay) %>%
+  select(MonthName, avg_delay)
+```
+ 
+### smallest avg delay (best month)
+```{r}
+best_month <- month_delay %>%
+  filter(avg_delay == min(avg_delay)) %>%
+  pull(MonthName)
+```
+
+### visualize results
+```{r}
+p3 <- ggplot(month_delay, aes(x = Month, y = avg_delay)) +
+  geom_col(fill = 'darkcyan', width = 0.7) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb) +
+  labs(
+  title = 'Average Delay by Month',
+  x = "Month",
+  y = "Avg Delay (mins)")
+ 
+  
+print(p3)
+ggsave("2a3_plot.png", plot = p3, width = 10, height = 5, dpi = 300)
+```
+
+## conclusion
+```{r}
+cat("Best flight month of the year is", (best_month))
+```
+
+# Question (b)
+Evaluate whether older planes suffer more delays on a year-to-year basis.
+
+
+## preparing the data
+```{r}
+# remove missing values from airplanes data
+airplanes <- na.omit(airplanes)
+
+# merge flightd with plane data and calculate plane age
+merged <- df %>%
+  left_join(airplanes, by = c("TailNum" = "tailnum")) %>%
+  filter(year != "0000", year != "None", !is.na(year), year > 1900) %>%
+  mutate(year = as.integer(year))
+```
+
+### calculate avg delay and number of flights by plane manufacturing year
+```{r}
+manuf_delay <- merged %>%
+  group_by(year) %>%
+  summarise(
+    avg_delay = mean(ArrDepDelay),
+    num_flights = n()
+) %>%
+filter(avg_delay > 0)
+```
+
+### avg delay bu manufacturing year
+```{r}
+cat("\nManufacturing years with the lowest avg delay:\n")
+manuf_delay %>%
+  arrange(avg_delay) %>%
+  select(year, avg_delay) %>%
+  head(5) %>%
+  print()
+```
+
+### visualize results
+```{r}
+p4 <- ggplot(manuf_delay, aes(x = year, y = avg_delay)) +
+  geom_point(aes(size = num_flights, color = avg_delay), alpha = 0.5) +
+  scale_size_continuous(range = c(2, 15)) +
+  scale_color_gradient(low = "Lightcyan", high = "darkcyan") +
+  labs(
+  title = 'Average Delay by Plane Manufacturing Year',
+  x = 'Manufacturing Year',
+  y = 'Avg Delay (mins)',
+  size = 'Number of Flights',
+  color = 'Avg Delay'
+  ) +
+  theme(legend.position = "None")
+  
+print(p4)
+ggsave("2a4_plot.png", plot = p4, width = 10, height = 5, dpi = 300)
+```
+
+
+## statisticaal analysis
+
+### calculate plane age
+```{r}
+merged <- merged %>%
+  mutate(plane_age = Year - as.integer(year))
+  
+# check result
+head(merged%>% select(Year, year, plane_age))
+```
+
+### avg delay by plane age
+```{r}
+age_delay <- merged %>%
+  group_by(plane_age) %>%
+  summarise(
+    avg_delay = mean(ArrDepDelay),
+    num_flights = n()
+  )
+```
+
+### split into old and new planes (with threshold 20 years)
+```{r}
+age_threshold <- 20
+
+merged <- merged %>%
+  mutate(
+    plane_category = ifelse(plane_age >= age_threshold, 'Old', 'New'),
+    is_delayed = ArrDepDelay > 15
+)
+```
+
+## summary statistics
+```{r}
+for (category in c('Old', 'New')) {
+  cat_data <- merged %>% filter(plane_category == category)
+  
+  cat(paste0("\n", category, "Planes:\n"))
+  cat(paste0("Total flights: ", nrow(cat_data), "\n"))
+  cat(paste0("Average delay: ", round(mean(cat_data$ArrDepDelay), 2), "minutes\n"))
+  cat(paste0("Proportion delayed: ", round(mean(cat_data$is_delayed), 3), "\n"))
+}
+```
+
+### old vs new planes flight delay proportion
+```{r}
+delayed_new <- merged %>%
+  filter(plane_age < age_threshold, !is.na(ArrDepDelay)) %>%
+  pull(ArrDepDelay)
+  
+delayed_old <- merged %>%
+  filter(plane_age >= age_threshold, !is.na(ArrDepDelay)) %>%
+  pull(ArrDepDelay)
+```
+
+## perform t-test
+```{r}
+t_test_result <- t.test(delayed_old, delayed_new, var.equal = FALSE)
+
+cat("\nt-test reults:\n")
+cat(paste0(" t-stat: ", round(t_test_result$statistic, 4), "\n"))
+cat(paste0(" p-value: ", sprintf("%.6f", t_test_result$p.value), "\n"))
+
+# t-test results
+if (t_test_result$p.value < 0.05) {
+  cat("t-test results : statistically significant\n")
+  cat("older planes have statistically significant delays than new ones\n")
+} else {
+  cat("t-test results : no statistical significance\n")
+  cat("no statistical evidence of difference in delays in new vs old planes\n")
+}
+```
+
+## year by year analysis
+```{r}
+results_by_year <- data.frame()
+
+for (flight_year in sort(unique(merged$Year))) {
+  year_data <- merged %>% filter(Year == flight_year)
+  
+  old_year <- year_data %>% filter(plane_age >= age_threshold)
+  new_year <- year_data %>% filter(plane_age < age_threshold)
+  
+  pr_delayed_old <- mean(old_year$is_delayed, na.rm = TRUE)
+  pr_delayed_new <- mean(new_year$is_delayed, na.rm = TRUE)
+  
+  if (nrow(old_year) > 0 && nrow(new_year) > 0) {
+  t_test_year <- t.test(
+  na.omit(old_year$ArrDepDelay),
+  na.omit(new_year$ArrDepDelay),
+  var.equal = FALSE
+  )
+  
+  results_by_year <- rbind(results_by_year, data.frame(
+    Year = flight_year,
+    pr_delayed_old = pr_delayed_old,
+    pr_delayed_new = pr_delayed_new,
+    t_stat = t_test_year$statistic,
+    p_value = t_test_year$p.value,
+    significance = t_test_year$p.value < 0.05
+    ))
+  }
+}
+
+# show results
+cat("\n Year by yaer analysis: \n")
+for (i in 1:nrow(results_by_year)) {
+  row <- results_by_year[i, ]
+  cat(paste0("\nYear ", row$Year, ":\n"))
+  cat(paste0(" old planes delayed: ", sprintf("%.3f", row$pr_delayed_old), "\n"))
+  cat(paste0(" New planes delayed: ", sprintf("%.3f", row$pr_delayed_new), "\n"))
+  cat(paste0(" Significant: ", ifelse(row$significance, "Yes", "No"), 
+             " (p =", sprintf("%.4f", row$p_value), ")\n"))
+
+}
+```
+
+
+## overall conclusion
+```{r}
+overall_stats <- merged %>%
+  group_by(plane_category) %>%
+  summarise(
+    mean_delay = mean(ArrDepDelay, na.rm = TRUE),
+    median_delay = median(ArrDepDelay, na.rm = TRUE),
+    std_delay = sd(ArrDepDelay, na.rm = TRUE),
+    count = n(),
+    pr_delayed = mean(is_delayed, na.rm = TRUE)
+  ) %>%
+  mutate(across(where(is.numeric), ~round(., 3)))
+  
+cat("\n Overall statistics by plane category:\n")
+print(overall_stats)
+```

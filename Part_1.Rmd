@@ -1,0 +1,129 @@
+---
+title: ST2195 Coursework -  Part 1 (a) & (b)
+author: SRN 230713176
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+### importing libraries
+```{r}
+library(stats)
+library(dplyr)
+library(ggplot2)
+```
+
+# Part 1 (a)
+In this part, you are asked to work with the Markov Chain Monte Carlo algorithm, in
+particular the Metropolis-Hastings algorithm. The aim is to simulate random numbers
+for the distribution with probability density function given below:
+$$f(x) = \frac{1}{2} exp(-|x|)$$,
+where x takes values in the real line and |x| denotes the absolute value of x. 
+
+
+### set random seed for reproducibility
+```{r}
+set.seed(42)
+```
+
+
+### define the probability density function f(x)
+```{r}
+f <- function(x) {
+0.5 * exp(-abs(x))
+}
+```
+
+
+### create a MCMC Metropolis-Hastings Random Walk Algorithm
+```{r}
+metropolis <- function(N, s, x0) {
+    samples <- numeric(N)
+    samples[1] <- x0
+    
+    for (i in 2:N) {
+    x_star <- rnorm(1, mean = samples[i -1], sd = s)
+    ratio <- f(x_star) / f(samples[i - 1])
+    u <- runif(1)
+    
+    if (log(u) < log(ratio)) {
+      samples[i] <- x_star
+    } else {
+      samples[i] <- samples [i - 1]
+      }
+    }
+    
+    return(samples)
+}
+```
+
+### calculate acceptance ratio
+```{r}
+acceptance_ratio <- function(samples) {
+    accepted <- sum(samples[-1] != samples[-length(samples)])
+    accepted / (length(samples) - 1)
+}
+```
+
+### run the algortighm
+```{r}
+samples <- metropolis(N = 1000, s = 1, x0 = 0)
+```
+
+### calculate sample statistics
+```{r}
+sample_mean <- mean(samples)
+sample_sd <- sd(samples)
+acc_ratio <- acceptance_ratio(samples)
+```
+
+### show results
+```{r}
+cat(sprintf("Sample Mean: %.6f\n", sample_mean))
+cat(sprintf("Sample Standard Deviation: %.6f\n", sample_sd))
+cat(sprintf("Acceptance ratio: %.3f\n", acc_ratio))
+cat("Target Mean: 0\n")
+cat(sprintf("Target Standard Deviation: %.6f\n", sqrt(2)))
+```
+
+
+### visualization of results
+```{r}
+# create a dataframe for the plot
+plot_df <- data.frame(s = s_grid, R_hat = R_hat_values)
+
+# assign colors based on R_hat threshold
+plot_df$color_group <- ifelse(plot_df$R_hat <= 1.05, 'Converged', 'Not Converged')
+
+# create a visualization
+p <- ggplot(plot_df, aes(x = s, y = R_hat)) +
+  geom_point(aes(color = color_group), alpha = 0.6, size = 1.5) +
+  
+  # Add horizontal line at 1.05
+  geom_hline(yintercept = 1.05, color = "darkgrey", linetype = "dashed",
+  linewidth = 0.7) +
+  
+  # Add text label for threshold
+  annotate("text", x = max(s_grid), y = 1.05, label = "1.05", 
+           vjust = -0.5, hjust = 1, color = "darkgrey", size = 3.5) +
+  
+  labs(title = "R-hat Convergence Diagnosis vs Step Size",
+       subtitle = paste("N =", N, ", J =", J),
+       x = "Step size (s)",
+       y = expression(hat(R))) +
+  
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.position = "none") +
+  
+  # color scale
+  scale_color_manual(values = c("Converged" = "grey", 
+                                 "Not Converged" = "darkcyan"))
+
+# save plot and display
+ggsave('1b_plot.png', plot = p, width = 10, height = 5, dpi = 300)
+print(p)
+```
